@@ -1,0 +1,69 @@
+name: Build & Submit
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Resolve packages
+        run: xcodebuild -resolvePackageDependencies -project SuujiNoHanashi.xcodeproj -scheme SuujiNoHanashi
+
+      - name: Archive
+        run: |
+          xcodebuild archive \
+            -project SuujiNoHanashi.xcodeproj \
+            -scheme SuujiNoHanashi \
+            -destination "generic/platform=iOS" \
+            -archivePath build/SuujiNoHanashi.xcarchive \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Export IPA
+        run: |
+          cat > ExportOptions.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${{ secrets.APPLE_TEAM_ID }}</string>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath build/SuujiNoHanashi.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist ExportOptions.plist
+
+      - name: Upload IPA to ASC
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: |
+          xcrun altool --upload-app \
+            -f build/export/SuujiNoHanashi.ipa \
+            -t ios \
+            --apiKey "$ASC_KEY_ID" \
+            --apiIssuer "$ASC_ISSUER_ID" \
+            --private-key-path <(echo "$ASC_PRIVATE_KEY")
+
+      - name: Install PyJWT
+        run: pip install PyJWT cryptography requests
+
+      - name: Submit for review
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: python scripts/submit.py
