@@ -27,7 +27,8 @@ jobs:
             -destination "generic/platform=iOS" \
             -archivePath build/SuujiNoHanashi.xcarchive \
             CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }}
+            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} \
+            -allowProvisioningUpdates
 
       - name: Export IPA
         run: |
