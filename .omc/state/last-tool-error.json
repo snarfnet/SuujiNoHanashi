@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"codex --version 2>&1 && omc --version 2>&1\",\"description\":\"Check Codex and OMC availability\"}",
+  "error": "Exit code 127\ncodex-cli 0.130.0\n/usr/bin/bash: line 1: omc: command not found",
+  "timestamp": "2026-05-12T13:04:13.702Z",
+  "retry_count": 2
+}
