@@ -6,65 +6,89 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-latest
+
     steps:
-      - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+    - name: Select Xcode 26
+      run: |
+        XCODE_APP=$(ls /Applications/ | grep -E "^Xcode_2[6-9]|^Xcode_[3-9][0-9]" | sort -V | tail -1)
+        if [ -n "$XCODE_APP" ]; then
+          sudo xcode-select -s "/Applications/$XCODE_APP"
+        else
+          XCODE_APP=$(ls /Applications/ | grep "^Xcode_" | sort -V | tail -1)
+          sudo xcode-select -s "/Applications/$XCODE_APP"
+        fi
+        xcodebuild -version
 
-      - name: Generate Xcode project
-        run: xcodegen generate
+    - name: Install XcodeGen
+      run: brew install xcodegen
 
-      - name: Resolve packages
-        run: xcodebuild -resolvePackageDependencies -project SuujiNoHanashi.xcodeproj -scheme SuujiNoHanashi
+    - name: Set build number
+      run: |
+        BUILD_NUM=$(( ${{ github.run_number }} + 10 ))
+        echo "BUILD_NUM=$BUILD_NUM" >> $GITHUB_ENV
+        sed -i "" "s/CURRENT_PROJECT_VERSION: \"[0-9]*\"/CURRENT_PROJECT_VERSION: \"$BUILD_NUM\"/" project.yml
 
-      - name: Archive
-        run: |
-          xcodebuild archive \
-            -project SuujiNoHanashi.xcodeproj \
-            -scheme SuujiNoHanashi \
-            -destination "generic/platform=iOS" \
-            -archivePath build/SuujiNoHanashi.xcarchive \
-            CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} \
-            -allowProvisioningUpdates
+    - name: Generate Xcode project
+      run: xcodegen generate
 
-      - name: Export IPA
-        run: |
-          cat > ExportOptions.plist << 'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-            <key>method</key><string>app-store-connect</string>
-            <key>teamID</key><string>${{ secrets.APPLE_TEAM_ID }}</string>
-            <key>uploadSymbols</key><true/>
-          </dict></plist>
-          PLIST
-          xcodebuild -exportArchive \
-            -archivePath build/SuujiNoHanashi.xcarchive \
-            -exportPath build/export \
-            -exportOptionsPlist ExportOptions.plist
+    - name: Import Distribution Certificate
+      env:
+        CERT_BASE64: ${{ secrets.DIST_CERT_BASE64 }}
+        CERT_PASSWORD: ${{ secrets.DIST_CERT_PASSWORD }}
+        KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+      run: |
+        security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+        security default-keychain -s build.keychain
+        security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+        security set-keychain-settings -t 3600 -u build.keychain
+        echo "$CERT_BASE64" | base64 -D > cert.p12
+        security import cert.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+        security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+        rm cert.p12
 
-      - name: Upload IPA to ASC
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
-        run: |
-          xcrun altool --upload-app \
-            -f build/export/SuujiNoHanashi.ipa \
-            -t ios \
-            --apiKey "$ASC_KEY_ID" \
-            --apiIssuer "$ASC_ISSUER_ID" \
-            --private-key-path <(echo "$ASC_PRIVATE_KEY")
+    - name: Set up ASC API Key
+      env:
+        ASC_API_KEY_CONTENT: ${{ secrets.ASC_API_KEY_CONTENT }}
+      run: |
+        mkdir -p ~/.appstoreconnect/private_keys
+        echo "$ASC_API_KEY_CONTENT" | base64 -D > ~/.appstoreconnect/private_keys/AuthKey_WDXGY9WX55.p8
 
-      - name: Install PyJWT
-        run: pip install PyJWT cryptography requests
+    - name: Archive
+      run: |
+        xcodebuild archive \
+          -project SuujiNoHanashi.xcodeproj \
+          -scheme SuujiNoHanashi \
+          -destination "generic/platform=iOS" \
+          -archivePath build/SuujiNoHanashi.xcarchive \
+          CODE_SIGN_STYLE=Automatic \
+          DEVELOPMENT_TEAM=83VGKGSQUH \
+          -allowProvisioningUpdates \
+          -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_WDXGY9WX55.p8 \
+          -authenticationKeyID WDXGY9WX55 \
+          -authenticationKeyIssuerID 2be0734f-943a-4d61-9dc9-5d9045c46fec
 
-      - name: Submit for review
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
-        run: python scripts/submit.py
+    - name: Export IPA
+      run: |
+        xcodebuild -exportArchive \
+          -archivePath build/SuujiNoHanashi.xcarchive \
+          -exportPath build/export \
+          -exportOptionsPlist ExportOptions.plist \
+          -allowProvisioningUpdates \
+          -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_WDXGY9WX55.p8 \
+          -authenticationKeyID WDXGY9WX55 \
+          -authenticationKeyIssuerID 2be0734f-943a-4d61-9dc9-5d9045c46fec
+
+    - name: Install PyJWT
+      run: pip3 install --break-system-packages PyJWT requests
+
+    - name: Submit for Review
+      env:
+        ASC_KEY_ID: WDXGY9WX55
+        ASC_ISSUER_ID: 2be0734f-943a-4d61-9dc9-5d9045c46fec
+        BUILD_NUMBER: ${{ env.BUILD_NUM }}
+      run: |
+        export ASC_PRIVATE_KEY=$(cat ~/.appstoreconnect/private_keys/AuthKey_WDXGY9WX55.p8)
+        python3 scripts/submit.py
