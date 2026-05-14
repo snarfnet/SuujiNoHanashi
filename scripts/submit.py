@@ -29,7 +29,7 @@ def api(method, path, **kw):
                           headers={"Authorization": f"Bearer {token()}",
                                    "Content-Type": "application/json"}, **kw)
     if r.status_code >= 400:
-        print(f"  ERR {r.status_code}: {r.text[:300]}")
+        print(f"  ERR {r.status_code}: {r.text[:2000]}")
     return r
 
 def api_json(method, path, **kw):
@@ -38,6 +38,12 @@ def api_json(method, path, **kw):
         return r, r.json()
     except Exception:
         return r, {}
+
+def require(r, action):
+    if r.status_code >= 400:
+        print(f"{action} failed")
+        sys.exit(1)
+    return r
 
 def wait_build(build_id, attempts=80):
     for i in range(attempts):
@@ -52,20 +58,19 @@ def wait_build(build_id, attempts=80):
 def main():
     print("=== SuujiNoHanashi submit ===")
     # Get latest build
-    r = api("GET", f"/builds?filter[app]={APP_ID}&sort=-uploadedDate&limit=10")
-    builds = r.json().get("data", [])
+    r = require(api("GET", f"/builds?filter[app]={APP_ID}&sort=-uploadedDate&limit=20"), "Fetch builds")
+    builds = [
+        build for build in r.json().get("data", [])
+        if build.get("attributes", {}).get("processingState") == "VALID"
+    ]
     if not builds:
-        print("No builds found"); sys.exit(1)
+        print("No valid builds found"); sys.exit(1)
     build_id = builds[0]["id"]
     build_ver = builds[0]["attributes"]["version"]
     print(f"Build: {build_ver} ({build_id})")
 
-    if builds[0]["attributes"]["processingState"] != "VALID":
-        if not wait_build(build_id):
-            print("Build not valid"); sys.exit(1)
-
     # Get or create version
-    r = api("GET", f"/apps/{APP_ID}/appStoreVersions?filter[platform]=IOS&limit=200")
+    r = require(api("GET", f"/apps/{APP_ID}/appStoreVersions?filter[platform]=IOS&limit=200"), "Fetch versions")
     versions = [
         version for version in r.json().get("data", [])
         if version.get("attributes", {}).get("versionString") == "1.0"
@@ -78,45 +83,45 @@ def main():
             print(f"Already submitted: {state}")
             return
     else:
-        r = api("POST", "/appStoreVersions", json={"data": {"type": "appStoreVersions",
+        r = require(api("POST", "/appStoreVersions", json={"data": {"type": "appStoreVersions",
             "attributes": {"platform": "IOS", "versionString": "1.0"},
-            "relationships": {"app": {"data": {"type": "apps", "id": APP_ID}}}}})
+            "relationships": {"app": {"data": {"type": "apps", "id": APP_ID}}}}}), "Create version")
         version_id = r.json()["data"]["id"]
         print(f"Created version: {version_id}")
 
     # Attach build
-    api("PATCH", f"/appStoreVersions/{version_id}/relationships/build",
-        json={"data": {"type": "builds", "id": build_id}})
+    require(api("PATCH", f"/appStoreVersions/{version_id}/relationships/build",
+        json={"data": {"type": "builds", "id": build_id}}), "Attach build")
 
     # Localization
-    r = api("GET", f"/appStoreVersions/{version_id}/appStoreVersionLocalizations")
+    r = require(api("GET", f"/appStoreVersions/{version_id}/appStoreVersionLocalizations"), "Fetch localization")
     locs = r.json().get("data", [])
     loc_id = locs[0]["id"] if locs else None
     if not loc_id:
-        r = api("POST", "/appStoreVersionLocalizations", json={"data": {"type": "appStoreVersionLocalizations",
+        r = require(api("POST", "/appStoreVersionLocalizations", json={"data": {"type": "appStoreVersionLocalizations",
             "attributes": {"locale": "ja", "description": DESC_JA,
                 "keywords": KEYWORDS, "marketingUrl": "https://snarfnet.github.io/",
                 "supportUrl": "https://snarfnet.github.io/"},
-            "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": version_id}}}}})
+            "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": version_id}}}}}), "Create localization")
         loc_id = r.json()["data"]["id"]
     else:
-        api("PATCH", f"/appStoreVersionLocalizations/{loc_id}", json={"data": {"type": "appStoreVersionLocalizations",
+        require(api("PATCH", f"/appStoreVersionLocalizations/{loc_id}", json={"data": {"type": "appStoreVersionLocalizations",
             "id": loc_id, "attributes": {"description": DESC_JA, "keywords": KEYWORDS,
-                "marketingUrl": "https://snarfnet.github.io/", "supportUrl": "https://snarfnet.github.io/"}}})
+                "marketingUrl": "https://snarfnet.github.io/", "supportUrl": "https://snarfnet.github.io/"}}}), "Update localization")
 
     ensure_review_detail(version_id)
     cancel_blocking_submissions()
 
     # Submit for review
-    r = api("POST", "/reviewSubmissions", json={"data": {"type": "reviewSubmissions",
+    r = require(api("POST", "/reviewSubmissions", json={"data": {"type": "reviewSubmissions",
         "attributes": {"platform": "IOS"},
-        "relationships": {"app": {"data": {"type": "apps", "id": APP_ID}}}}})
+        "relationships": {"app": {"data": {"type": "apps", "id": APP_ID}}}}}), "Create review submission")
     sub_id = r.json()["data"]["id"]
-    api("POST", "/reviewSubmissionItems", json={"data": {"type": "reviewSubmissionItems",
+    require(api("POST", "/reviewSubmissionItems", json={"data": {"type": "reviewSubmissionItems",
         "relationships": {"reviewSubmission": {"data": {"type": "reviewSubmissions", "id": sub_id}},
-            "appStoreVersion": {"data": {"type": "appStoreVersions", "id": version_id}}}}})
-    api("PATCH", f"/reviewSubmissions/{sub_id}", json={"data": {"type": "reviewSubmissions",
-        "id": sub_id, "attributes": {"submitted": True}}})
+            "appStoreVersion": {"data": {"type": "appStoreVersions", "id": version_id}}}}}), "Add review item")
+    require(api("PATCH", f"/reviewSubmissions/{sub_id}", json={"data": {"type": "reviewSubmissions",
+        "id": sub_id, "attributes": {"submitted": True}}}), "Submit review")
     print("Submitted for review!")
 
 def ensure_review_detail(version_id):
@@ -136,40 +141,43 @@ def ensure_review_detail(version_id):
     r, body = api_json("GET", f"/appStoreVersions/{version_id}/appStoreReviewDetail")
     if r.status_code == 200 and body.get("data"):
         detail_id = body["data"]["id"]
-        api("PATCH", f"/appStoreReviewDetails/{detail_id}", json={
+        require(api("PATCH", f"/appStoreReviewDetails/{detail_id}", json={
             "data": {"type": "appStoreReviewDetails", "id": detail_id, "attributes": attrs}
-        })
+        }), "Update review detail")
         return
-    api("POST", "/appStoreReviewDetails", json={
+    require(api("POST", "/appStoreReviewDetails", json={
         "data": {
             "type": "appStoreReviewDetails",
             "attributes": attrs,
             "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": version_id}}},
         }
-    })
+    }), "Create review detail")
 
 def cancel_blocking_submissions():
     for state in ("UNRESOLVED_ISSUES", "READY_FOR_REVIEW"):
         r = api("GET", f"/apps/{APP_ID}/reviewSubmissions?filter[state]={state}&limit=200")
         for submission in r.json().get("data", []):
             submission_id = submission["id"]
-            api("PATCH", f"/reviewSubmissions/{submission_id}", json={
+            r = api("PATCH", f"/reviewSubmissions/{submission_id}", json={
                 "data": {
                     "type": "reviewSubmissions",
                     "id": submission_id,
                     "attributes": {"canceled": True},
                 }
             })
-            print(f"Canceled review submission: {submission_id}")
-            time.sleep(10)
+            if r.status_code < 400:
+                print(f"Canceled review submission: {submission_id}")
+                time.sleep(10)
+            else:
+                print(f"Could not cancel review submission: {submission_id}")
 
-DESC_JA = """数字には、知られざる物語が眠っている。
+DESC_JA = """数字には、知られざる物語が眠っています。
 
-好きな数字を入力して「調べる」をタップするだけ。その数字にまつわるトリビア、数学的な秘密、歴史上の出来事が、英語と日本語で表示されます。
+好きな数字を入力して「調べる」をタップするだけ。その数字にまつわるトリビア、数学的な性質、歴史上の出来事を、英語と日本語で表示します。
 
-• トリビア：その数字にまつわる雑学
-• 数学：数学的な特性や法則
-• 歴史：その年に起きた出来事
+・トリビア：その数字にまつわる雑学
+・数学：数学的な特徴や豆知識
+・歴史：その年に起きた出来事
 
 何気なく目にする数字も、調べてみると面白い話が隠れているかもしれません。"""
 
