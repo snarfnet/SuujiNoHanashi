@@ -55,18 +55,38 @@ def wait_build(build_id, attempts=80):
         time.sleep(30)
     return False
 
+def find_uploaded_build(expected_build_number=None, attempts=80):
+    for i in range(attempts):
+        r = require(api("GET", f"/builds?filter[app]={APP_ID}&sort=-uploadedDate&limit=20"), "Fetch builds")
+        builds = r.json().get("data", [])
+        if expected_build_number:
+            builds = [
+                build for build in builds
+                if build.get("attributes", {}).get("version") == expected_build_number
+            ]
+        if builds:
+            build = builds[0]
+            state = build.get("attributes", {}).get("processingState")
+            build_ver = build.get("attributes", {}).get("version")
+            print(f"  Build {build_ver}: {state} ({i+1}/{attempts})")
+            if state == "VALID":
+                return build
+            if state in ["INVALID", "FAILED"]:
+                print(f"Build {build_ver} processing failed")
+                sys.exit(1)
+        else:
+            label = expected_build_number or "latest"
+            print(f"  Waiting for build {label} to appear ({i+1}/{attempts})")
+        time.sleep(30)
+    print("Timed out waiting for the uploaded build to become valid")
+    sys.exit(1)
+
 def main():
     print("=== SuujiNoHanashi submit ===")
-    # Get latest build
-    r = require(api("GET", f"/builds?filter[app]={APP_ID}&sort=-uploadedDate&limit=20"), "Fetch builds")
-    builds = [
-        build for build in r.json().get("data", [])
-        if build.get("attributes", {}).get("processingState") == "VALID"
-    ]
-    if not builds:
-        print("No valid builds found"); sys.exit(1)
-    build_id = builds[0]["id"]
-    build_ver = builds[0]["attributes"]["version"]
+    expected_build_number = os.environ.get("BUILD_NUMBER")
+    build = find_uploaded_build(expected_build_number)
+    build_id = build["id"]
+    build_ver = build["attributes"]["version"]
     print(f"Build: {build_ver} ({build_id})")
 
     # Get or create version
