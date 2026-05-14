@@ -28,7 +28,7 @@ jobs:
 
     - name: Set build number
       run: |
-        BUILD_NUM=$(( ${{ github.run_number }} + 10 ))
+        BUILD_NUM=$(( ${{ github.run_number }} + 30 ))
         echo "BUILD_NUM=$BUILD_NUM" >> $GITHUB_ENV
         sed -i "" "s/CURRENT_PROJECT_VERSION: \"[0-9]*\"/CURRENT_PROJECT_VERSION: \"$BUILD_NUM\"/" project.yml
         sed -i "" "s/CFBundleVersion: \"[0-9]*\"/CFBundleVersion: \"$BUILD_NUM\"/" project.yml
