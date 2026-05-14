@@ -134,8 +134,9 @@ def ensure_review_detail(version_id):
         "demoAccountName": "",
         "demoAccountPassword": "",
         "notes": (
-            "This build requests AppTrackingTransparency permission immediately after launch. "
-            "Google Mobile Ads starts only after the ATT request is completed, and banner ads load after that."
+            "This build makes the app iPhone-only by setting TARGETED_DEVICE_FAMILY to iPhone and removing iPad-specific supported orientations. "
+            "The app is not intended to be offered as an iPad app at this time. "
+            "Banner ads remain enabled on iPhone. As an additional safeguard, Google Mobile Ads does not start when the runtime device idiom is iPad."
         ),
     }
     r, body = api_json("GET", f"/appStoreVersions/{version_id}/appStoreReviewDetail")

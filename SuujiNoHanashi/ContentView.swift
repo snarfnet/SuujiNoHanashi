@@ -1,5 +1,6 @@
 import SwiftUI
 import Translation
+import UIKit
 
 // MARK: - Theme
 private enum N {
@@ -31,7 +32,7 @@ struct ContentView: View {
             GridDecoration().ignoresSafeArea().allowsHitTesting(false)
 
             VStack(spacing: 0) {
-                if adMobStartup.isReady {
+                if UIDevice.current.userInterfaceIdiom == .phone && adMobStartup.isReady {
                     BannerAdView(adUnitID: "ca-app-pub-9404799280370656/7006688247")
                         .frame(height: 50)
                 }
@@ -52,7 +53,7 @@ struct ContentView: View {
                 }
                 .scrollIndicators(.hidden)
 
-                if adMobStartup.isReady {
+                if UIDevice.current.userInterfaceIdiom == .phone && adMobStartup.isReady {
                     BannerAdView(adUnitID: "ca-app-pub-9404799280370656/9156769478")
                         .frame(height: 50)
                 }

@@ -11,6 +11,7 @@ struct BannerAdView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: BannerView, context: Context) {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { return }
         guard uiView.rootViewController == nil else { return }
         DispatchQueue.main.async {
             let rootVC = UIApplication.shared.connectedScenes

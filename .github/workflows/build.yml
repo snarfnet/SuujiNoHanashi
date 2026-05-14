@@ -35,6 +35,11 @@ jobs:
     - name: Generate Xcode project
       run: xcodegen generate
 
+    - name: Clear SwiftPM cache
+      run: |
+        rm -rf ~/Library/Caches/org.swift.swiftpm
+        rm -rf ~/Library/Developer/Xcode/DerivedData
+
     - name: Import Distribution Certificate
       env:
         CERT_BASE64: ${{ secrets.DIST_CERT_BASE64 }}
