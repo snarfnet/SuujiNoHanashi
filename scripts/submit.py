@@ -32,6 +32,13 @@ def api(method, path, **kw):
         print(f"  ERR {r.status_code}: {r.text[:300]}")
     return r
 
+def api_json(method, path, **kw):
+    r = api(method, path, **kw)
+    try:
+        return r, r.json()
+    except Exception:
+        return r, {}
+
 def wait_build(build_id, attempts=80):
     for i in range(attempts):
         r = api("GET", f"/builds/{build_id}")
@@ -58,11 +65,18 @@ def main():
             print("Build not valid"); sys.exit(1)
 
     # Get or create version
-    r = api("GET", f"/apps/{APP_ID}/appStoreVersions?filter[platform]=IOS&filter[appStoreState]=PREPARE_FOR_SUBMISSION,READY_FOR_REVIEW,DEVELOPER_REJECTED")
-    versions = r.json().get("data", [])
+    r = api("GET", f"/apps/{APP_ID}/appStoreVersions?filter[platform]=IOS&limit=200")
+    versions = [
+        version for version in r.json().get("data", [])
+        if version.get("attributes", {}).get("versionString") == "1.0"
+    ]
     if versions:
         version_id = versions[0]["id"]
-        print(f"Existing version: {version_id}")
+        state = versions[0].get("attributes", {}).get("appStoreState")
+        print(f"Existing version: {version_id} ({state})")
+        if state in ("WAITING_FOR_REVIEW", "IN_REVIEW"):
+            print(f"Already submitted: {state}")
+            return
     else:
         r = api("POST", "/appStoreVersions", json={"data": {"type": "appStoreVersions",
             "attributes": {"platform": "IOS", "versionString": "1.0"},
@@ -90,6 +104,9 @@ def main():
             "id": loc_id, "attributes": {"description": DESC_JA, "keywords": KEYWORDS,
                 "marketingUrl": "https://snarfnet.github.io/", "supportUrl": "https://snarfnet.github.io/"}}})
 
+    ensure_review_detail(version_id)
+    cancel_blocking_submissions()
+
     # Submit for review
     r = api("POST", "/reviewSubmissions", json={"data": {"type": "reviewSubmissions",
         "attributes": {"platform": "IOS"},
@@ -101,6 +118,50 @@ def main():
     api("PATCH", f"/reviewSubmissions/{sub_id}", json={"data": {"type": "reviewSubmissions",
         "id": sub_id, "attributes": {"submitted": True}}})
     print("Submitted for review!")
+
+def ensure_review_detail(version_id):
+    attrs = {
+        "contactFirstName": "Tokyo",
+        "contactLastName": "Nasu",
+        "contactEmail": "tokyonasu@yahoo.co.jp",
+        "contactPhone": "+81 80-2368-9194",
+        "demoAccountRequired": False,
+        "demoAccountName": "",
+        "demoAccountPassword": "",
+        "notes": (
+            "This build requests AppTrackingTransparency permission immediately after launch. "
+            "Google Mobile Ads starts only after the ATT request is completed, and banner ads load after that."
+        ),
+    }
+    r, body = api_json("GET", f"/appStoreVersions/{version_id}/appStoreReviewDetail")
+    if r.status_code == 200 and body.get("data"):
+        detail_id = body["data"]["id"]
+        api("PATCH", f"/appStoreReviewDetails/{detail_id}", json={
+            "data": {"type": "appStoreReviewDetails", "id": detail_id, "attributes": attrs}
+        })
+        return
+    api("POST", "/appStoreReviewDetails", json={
+        "data": {
+            "type": "appStoreReviewDetails",
+            "attributes": attrs,
+            "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": version_id}}},
+        }
+    })
+
+def cancel_blocking_submissions():
+    for state in ("UNRESOLVED_ISSUES", "READY_FOR_REVIEW"):
+        r = api("GET", f"/apps/{APP_ID}/reviewSubmissions?filter[state]={state}&limit=200")
+        for submission in r.json().get("data", []):
+            submission_id = submission["id"]
+            api("PATCH", f"/reviewSubmissions/{submission_id}", json={
+                "data": {
+                    "type": "reviewSubmissions",
+                    "id": submission_id,
+                    "attributes": {"canceled": True},
+                }
+            })
+            print(f"Canceled review submission: {submission_id}")
+            time.sleep(10)
 
 DESC_JA = """数字には、知られざる物語が眠っている。
 

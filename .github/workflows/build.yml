@@ -82,6 +82,25 @@ jobs:
           -authenticationKeyID WDXGY9WX55 \
           -authenticationKeyIssuerID 2be0734f-943a-4d61-9dc9-5d9045c46fec
 
+    - name: Upload IPA
+      run: |
+        IPA_PATH="$(find build/export -name '*.ipa' -print -quit)"
+        test -n "$IPA_PATH"
+        set +e
+        xcrun altool --upload-app \
+          --type ios \
+          --file "$IPA_PATH" \
+          --apiKey WDXGY9WX55 \
+          --apiIssuer 2be0734f-943a-4d61-9dc9-5d9045c46fec 2>&1 | tee /tmp/suuji-upload.log
+        ALTOOL_STATUS=${PIPESTATUS[0]}
+        set -e
+        if grep -E "UPLOAD FAILED|Validation failed|Failed to upload package" /tmp/suuji-upload.log; then
+          exit 1
+        fi
+        if [ "$ALTOOL_STATUS" -ne 0 ]; then
+          exit "$ALTOOL_STATUS"
+        fi
+
     - name: Install PyJWT
       run: pip3 install --break-system-packages PyJWT requests
 
