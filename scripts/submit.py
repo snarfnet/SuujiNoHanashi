@@ -52,7 +52,7 @@ def wait_build(build_id, attempts=80):
 def main():
     print("=== SuujiNoHanashi submit ===")
     # Get latest build
-    r = api("GET", f"/apps/{APP_ID}/builds?limit=1&sort=-uploadedDate&filter[processingState]=VALID,PROCESSING")
+    r = api("GET", f"/builds?filter[app]={APP_ID}&sort=-uploadedDate&limit=10")
     builds = r.json().get("data", [])
     if not builds:
         print("No builds found"); sys.exit(1)
