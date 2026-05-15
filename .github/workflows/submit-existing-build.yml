@@ -1,0 +1,39 @@
+name: Submit Existing Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: App Store Connect build number to submit
+        required: true
+      version_string:
+        description: App Store version
+        required: true
+        default: "1.0"
+
+jobs:
+  submit:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up ASC API Key
+        env:
+          ASC_API_KEY_CONTENT: ${{ secrets.ASC_API_KEY_CONTENT }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$ASC_API_KEY_CONTENT" | base64 -D > ~/.appstoreconnect/private_keys/AuthKey_WDXGY9WX55.p8
+
+      - name: Install Python dependencies
+        run: pip3 install --break-system-packages PyJWT requests
+
+      - name: Submit existing build
+        env:
+          ASC_KEY_ID: WDXGY9WX55
+          ASC_ISSUER_ID: 2be0734f-943a-4d61-9dc9-5d9045c46fec
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          APP_VERSION: ${{ inputs.version_string }}
+        run: |
+          export ASC_PRIVATE_KEY=$(cat ~/.appstoreconnect/private_keys/AuthKey_WDXGY9WX55.p8)
+          python3 scripts/submit.py

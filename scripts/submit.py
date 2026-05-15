@@ -100,8 +100,13 @@ def main():
         state = versions[0].get("attributes", {}).get("appStoreState")
         print(f"Existing version: {version_id} ({state})")
         if state in ("WAITING_FOR_REVIEW", "IN_REVIEW"):
-            print(f"Already submitted: {state}")
-            return
+            if expected_build_number and state == "WAITING_FOR_REVIEW":
+                print(f"Version is already {state}; canceling current review submission to replace it with build {expected_build_number}.")
+                cancel_blocking_submissions()
+                time.sleep(20)
+            else:
+                print(f"Already submitted: {state}")
+                return
     else:
         r = require(api("POST", "/appStoreVersions", json={"data": {"type": "appStoreVersions",
             "attributes": {"platform": "IOS", "versionString": "1.0"},
@@ -177,7 +182,7 @@ def ensure_review_detail(version_id):
     }), "Create review detail")
 
 def cancel_blocking_submissions():
-    for state in ("UNRESOLVED_ISSUES", "READY_FOR_REVIEW"):
+    for state in ("UNRESOLVED_ISSUES", "READY_FOR_REVIEW", "WAITING_FOR_REVIEW"):
         r = api("GET", f"/apps/{APP_ID}/reviewSubmissions?filter[state]={state}&limit=200")
         for submission in r.json().get("data", []):
             submission_id = submission["id"]
