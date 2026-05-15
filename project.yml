@@ -34,5 +34,12 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         ITSAppUsesNonExemptEncryption: false
+        GADApplicationIdentifier: "ca-app-pub-9404799280370656~9177556018"
+    dependencies:
+      - package: GoogleMobileAds
     scheme:
       testTargets: []
+packages:
+  GoogleMobileAds:
+    url: https://github.com/googleads/swift-package-manager-google-mobile-ads
+    from: "12.0.0"

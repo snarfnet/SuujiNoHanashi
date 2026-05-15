@@ -16,6 +16,7 @@ private enum N {
 
 // MARK: - ContentView
 struct ContentView: View {
+    @EnvironmentObject private var adMobStartup: AdMobStartup
     @State private var inputText = ""
     @State private var selectedCategory: NumberCategory = .trivia
     @State private var fact: NumberFact?
@@ -31,6 +32,11 @@ struct ContentView: View {
             GridDecoration().ignoresSafeArea().allowsHitTesting(false)
 
             VStack(spacing: 0) {
+                if AdRuntime.allowsAds && adMobStartup.isReady {
+                    BannerAdView(adUnitID: "ca-app-pub-9404799280370656/7006688247")
+                        .frame(height: 50)
+                }
+
                 ScrollView {
                     VStack(spacing: 24) {
                         headerSection
@@ -46,6 +52,11 @@ struct ContentView: View {
                     .padding(.top, 20)
                 }
                 .scrollIndicators(.hidden)
+
+                if AdRuntime.allowsAds && adMobStartup.isReady {
+                    BannerAdView(adUnitID: "ca-app-pub-9404799280370656/9156769478")
+                        .frame(height: 50)
+                }
             }
         }
         .preferredColorScheme(.dark)

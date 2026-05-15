@@ -155,7 +155,9 @@ def ensure_review_detail(version_id):
         "demoAccountPassword": "",
         "notes": (
             "This build addresses the launch crash reported on iPad Air 11-inch running iPadOS 26.5. "
-            "The Google Mobile Ads SDK and all banner ad startup code were removed so the app no longer initializes ad code on launch or during iPad compatibility mode. "
+            "Ads remain enabled on iPhone, but the app now checks the hardware model before touching Google Mobile Ads. "
+            "On iPad hardware, including iPhone compatibility mode, the app does not start Mobile Ads, create banner views, or request ads. "
+            "Ad startup is also delayed until after the first screen is active. "
             "The app now launches directly to the number search screen with no login required."
         ),
     }
