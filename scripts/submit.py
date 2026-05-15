@@ -154,9 +154,9 @@ def ensure_review_detail(version_id):
         "demoAccountName": "",
         "demoAccountPassword": "",
         "notes": (
-            "This build makes the app iPhone-only by setting TARGETED_DEVICE_FAMILY to iPhone and removing iPad-specific supported orientations. "
-            "The app is not intended to be offered as an iPad app at this time. "
-            "Banner ads remain enabled on iPhone. As an additional safeguard, Google Mobile Ads does not start when the runtime device idiom is iPad."
+            "This build addresses the launch crash reported on iPad Air 11-inch running iPadOS 26.5. "
+            "The Google Mobile Ads SDK and all banner ad startup code were removed so the app no longer initializes ad code on launch or during iPad compatibility mode. "
+            "The app now launches directly to the number search screen with no login required."
         ),
     }
     r, body = api_json("GET", f"/appStoreVersions/{version_id}/appStoreReviewDetail")
