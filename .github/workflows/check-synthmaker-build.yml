@@ -1,0 +1,68 @@
+name: Check SynthMaker Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python dependencies
+        run: pip3 install --break-system-packages PyJWT requests
+
+      - name: Check latest SynthMaker builds
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import time
+
+          import jwt
+          import requests
+
+          app_id = "6770153620"
+          base = "https://api.appstoreconnect.apple.com/v1"
+          key_id = os.environ["ASC_KEY_ID"]
+          issuer_id = os.environ["ASC_ISSUER_ID"]
+          private_key = os.environ["ASC_PRIVATE_KEY"]
+
+          def make_token():
+              now = int(time.time())
+              return jwt.encode(
+                  {"iss": issuer_id, "iat": now, "exp": now + 1200, "aud": "appstoreconnect-v1"},
+                  private_key,
+                  algorithm="ES256",
+                  headers={"kid": key_id, "typ": "JWT"},
+              )
+
+          response = requests.get(
+              f"{base}/builds?filter[app]={app_id}&sort=-uploadedDate&limit=10",
+              headers={"Authorization": f"Bearer {make_token()}"},
+          )
+          print(f"HTTP {response.status_code}")
+          if response.status_code >= 400:
+              print(response.text[:4000])
+              raise SystemExit(1)
+
+          builds = response.json().get("data", [])
+          if not builds:
+              print("No builds found yet.")
+              raise SystemExit(0)
+
+          for build in builds:
+              attrs = build.get("attributes", {})
+              print(
+                  "Build "
+                  f"id={build.get('id')} "
+                  f"version={attrs.get('version')} "
+                  f"appVersion={attrs.get('appVersion')} "
+                  f"state={attrs.get('processingState')} "
+                  f"uploaded={attrs.get('uploadedDate')}"
+              )
+          PY
