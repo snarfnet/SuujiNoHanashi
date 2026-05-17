@@ -46,6 +46,7 @@ jobs:
           BUILD_NUMBER = os.environ["BUILD_NUMBER"]
           VERSION_STRING = os.environ["VERSION_STRING"]
           SUPPORT_URL = "https://github.com/snarfnet/SynthMaker"
+          PRIVACY_URL = "https://github.com/snarfnet/SynthMaker/blob/main/PRIVACY.md"
           DESCRIPTION = (
               "SynthMaker is a compact acid bass synthesizer inspired by classic hardware. "
               "Shape oscillator, filter, envelope, keyboard notes, and step patterns from a dark tactile control panel."
@@ -136,6 +137,23 @@ jobs:
               )
               print(f"Attached build: {build_id}")
 
+          def update_build_encryption(build_id):
+              require(
+                  api(
+                      "PATCH",
+                      f"/builds/{build_id}",
+                      json={
+                          "data": {
+                              "type": "builds",
+                              "id": build_id,
+                              "attributes": {"usesNonExemptEncryption": False},
+                          }
+                      },
+                  ),
+                  "Update build encryption",
+              )
+              print("Updated build encryption declaration")
+
           def update_content_rights():
               require(
                   api(
@@ -165,8 +183,62 @@ jobs:
               print(f"Using app info: {info_id}")
               return info_id
 
+          def update_app_info(info_id):
+              require(
+                  api(
+                      "PATCH",
+                      f"/appInfos/{info_id}",
+                      json={
+                          "data": {
+                              "type": "appInfos",
+                              "id": info_id,
+                              "relationships": {
+                                  "primaryCategory": {
+                                      "data": {"type": "appCategories", "id": "MUSIC"}
+                                  },
+                                  "secondaryCategory": {
+                                      "data": {"type": "appCategories", "id": "UTILITIES"}
+                                  },
+                              },
+                          }
+                      },
+                  ),
+                  "Update app categories",
+              )
+              print("Updated app categories")
+
+          def update_app_info_localization(info_id):
+              response = require(
+                  api("GET", f"/appInfos/{info_id}/appInfoLocalizations"),
+                  "Fetch app info localizations",
+              )
+              localizations = response.json().get("data", [])
+              if not localizations:
+                  print("No app info localization found.")
+                  sys.exit(1)
+              loc = localizations[0]
+              require(
+                  api(
+                      "PATCH",
+                      f"/appInfoLocalizations/{loc['id']}",
+                      json={
+                          "data": {
+                              "type": "appInfoLocalizations",
+                              "id": loc["id"],
+                              "attributes": {
+                                  "privacyPolicyUrl": PRIVACY_URL,
+                              },
+                          }
+                      },
+                  ),
+                  "Update app info localization",
+              )
+              print(f"Updated privacy policy URL: {loc['attributes']['locale']}")
+
           def update_age_rating():
               declaration_id = app_info_id()
+              update_app_info(declaration_id)
+              update_app_info_localization(declaration_id)
               attrs = {
                   "advertising": False,
                   "ageAssurance": False,
@@ -264,6 +336,26 @@ jobs:
                   "Create localization",
               )
               print(f"Created localization: {locale}")
+
+          def update_version_metadata(version_id):
+              require(
+                  api(
+                      "PATCH",
+                      f"/appStoreVersions/{version_id}",
+                      json={
+                          "data": {
+                              "type": "appStoreVersions",
+                              "id": version_id,
+                              "attributes": {
+                                  "copyright": "2026 Tokyo Nasu",
+                                  "usesIdfa": False,
+                              },
+                          }
+                      },
+                  ),
+                  "Update version metadata",
+              )
+              print("Updated version metadata")
 
           def upsert_review_detail(version_id):
               attrs = {
@@ -397,9 +489,11 @@ jobs:
           version = get_or_create_version()
           version_id = version["id"]
           attach_build(version_id, build["id"])
+          update_build_encryption(build["id"])
           update_content_rights()
           update_age_rating()
           upsert_localization(version_id)
+          update_version_metadata(version_id)
           upsert_review_detail(version_id)
           submit_review(version_id)
           PY
