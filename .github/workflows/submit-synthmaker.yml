@@ -155,7 +155,18 @@ jobs:
               )
               print("Updated content rights declaration")
 
-          def update_age_rating(version_id):
+          def app_info_id():
+              response = require(api("GET", f"/apps/{APP_ID}/appInfos?limit=10"), "Fetch app infos")
+              infos = response.json().get("data", [])
+              if not infos:
+                  print("No app info found.")
+                  sys.exit(1)
+              info_id = infos[0]["id"]
+              print(f"Using app info: {info_id}")
+              return info_id
+
+          def update_age_rating():
+              declaration_id = app_info_id()
               attrs = {
                   "advertising": False,
                   "ageAssurance": False,
@@ -184,11 +195,11 @@ jobs:
               require(
                   api(
                       "PATCH",
-                      f"/ageRatingDeclarations/{version_id}",
+                      f"/ageRatingDeclarations/{declaration_id}",
                       json={
                           "data": {
                               "type": "ageRatingDeclarations",
-                              "id": version_id,
+                              "id": declaration_id,
                               "attributes": attrs,
                           }
                       },
@@ -387,7 +398,7 @@ jobs:
           version_id = version["id"]
           attach_build(version_id, build["id"])
           update_content_rights()
-          update_age_rating(version_id)
+          update_age_rating()
           upsert_localization(version_id)
           upsert_review_detail(version_id)
           submit_review(version_id)
