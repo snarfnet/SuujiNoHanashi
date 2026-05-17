@@ -1,0 +1,98 @@
+name: Register Bundle ID
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_id:
+        description: Bundle identifier
+        required: true
+        default: com.tokyonasu.SynthMaker
+      bundle_name:
+        description: Bundle display name
+        required: true
+        default: SynthMaker
+
+jobs:
+  register:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python dependencies
+        run: pip3 install --break-system-packages PyJWT requests
+
+      - name: Register Bundle ID
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          BUNDLE_ID: ${{ inputs.bundle_id }}
+          BUNDLE_NAME: ${{ inputs.bundle_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import sys
+          import time
+
+          import jwt
+          import requests
+
+          base = "https://api.appstoreconnect.apple.com/v1"
+          key_id = os.environ["ASC_KEY_ID"]
+          issuer_id = os.environ["ASC_ISSUER_ID"]
+          private_key = os.environ["ASC_PRIVATE_KEY"]
+          bundle_id = os.environ["BUNDLE_ID"]
+          bundle_name = os.environ["BUNDLE_NAME"]
+
+          def make_token():
+              now = int(time.time())
+              return jwt.encode(
+                  {"iss": issuer_id, "iat": now, "exp": now + 1200, "aud": "appstoreconnect-v1"},
+                  private_key,
+                  algorithm="ES256",
+                  headers={"kid": key_id, "typ": "JWT"},
+              )
+
+          def request(method, path, **kwargs):
+              response = requests.request(
+                  method,
+                  base + path,
+                  headers={
+                      "Authorization": f"Bearer {make_token()}",
+                      "Content-Type": "application/json",
+                  },
+                  **kwargs,
+              )
+              if response.status_code >= 400:
+                  print(f"{method} {path} failed: {response.status_code}")
+                  print(response.text[:4000])
+              return response
+
+          existing = request("GET", f"/bundleIds?filter[identifier]={bundle_id}&limit=1")
+          if existing.status_code >= 400:
+              sys.exit(1)
+
+          matches = existing.json().get("data", [])
+          if matches:
+              match = matches[0]
+              print(f"Bundle ID already exists: {match['attributes']['identifier']} ({match['id']})")
+              sys.exit(0)
+
+          payload = {
+              "data": {
+                  "type": "bundleIds",
+                  "attributes": {
+                      "identifier": bundle_id,
+                      "name": bundle_name,
+                      "platform": "IOS",
+                  },
+              }
+          }
+          created = request("POST", "/bundleIds", json=payload)
+          if created.status_code >= 400:
+              sys.exit(1)
+
+          data = created.json()["data"]
+          print(f"Registered Bundle ID: {data['attributes']['identifier']} ({data['id']})")
+          PY
