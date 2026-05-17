@@ -95,8 +95,17 @@ jobs:
         run: |
           IPA_PATH="$(find build/export -name '*.ipa' -print -quit)"
           test -n "$IPA_PATH"
+          set +e
           xcrun altool --upload-app \
             --type ios \
             --file "$IPA_PATH" \
             --apiKey "$ASC_KEY_ID" \
-            --apiIssuer "$ASC_ISSUER_ID"
+            --apiIssuer "$ASC_ISSUER_ID" 2>&1 | tee /tmp/synthmaker-upload.log
+          ALTOOL_STATUS=${PIPESTATUS[0]}
+          set -e
+          if grep -E "UPLOAD FAILED|Validation failed|Failed to upload package" /tmp/synthmaker-upload.log; then
+            exit 1
+          fi
+          if [ "$ALTOOL_STATUS" -ne 0 ]; then
+            exit "$ALTOOL_STATUS"
+          fi
