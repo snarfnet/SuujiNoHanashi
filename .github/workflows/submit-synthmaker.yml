@@ -1,0 +1,331 @@
+name: Submit SynthMaker
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: App Store Connect build number
+        required: true
+        default: "102"
+      version_string:
+        description: App Store version
+        required: true
+        default: "1.0"
+
+jobs:
+  submit:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python dependencies
+        run: pip3 install --break-system-packages PyJWT requests
+
+      - name: Submit SynthMaker for review
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          VERSION_STRING: ${{ inputs.version_string }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import sys
+          import time
+
+          import jwt
+          import requests
+
+          APP_ID = "6770153620"
+          BASE = "https://api.appstoreconnect.apple.com/v1"
+          KEY_ID = os.environ["ASC_KEY_ID"]
+          ISSUER_ID = os.environ["ASC_ISSUER_ID"]
+          PRIVATE_KEY = os.environ["ASC_PRIVATE_KEY"]
+          BUILD_NUMBER = os.environ["BUILD_NUMBER"]
+          VERSION_STRING = os.environ["VERSION_STRING"]
+          SUPPORT_URL = "https://github.com/snarfnet/SynthMaker"
+          DESCRIPTION = (
+              "SynthMaker is a compact acid bass synthesizer inspired by classic hardware. "
+              "Shape oscillator, filter, envelope, keyboard notes, and step patterns from a dark tactile control panel."
+          )
+          KEYWORDS = "synth,synthesizer,bass,acid,keyboard,music,audio,sequencer"
+
+          def token():
+              now = int(time.time())
+              return jwt.encode(
+                  {"iss": ISSUER_ID, "iat": now, "exp": now + 1200, "aud": "appstoreconnect-v1"},
+                  PRIVATE_KEY,
+                  algorithm="ES256",
+                  headers={"kid": KEY_ID, "typ": "JWT"},
+              )
+
+          def api(method, path, **kwargs):
+              response = requests.request(
+                  method,
+                  BASE + path,
+                  headers={
+                      "Authorization": f"Bearer {token()}",
+                      "Content-Type": "application/json",
+                  },
+                  **kwargs,
+              )
+              if response.status_code >= 400:
+                  print(f"{method} {path} failed: {response.status_code}")
+                  print(response.text[:5000])
+              return response
+
+          def require(response, action):
+              if response.status_code >= 400:
+                  print(f"{action} failed")
+                  sys.exit(1)
+              return response
+
+          def api_json(method, path, **kwargs):
+              response = api(method, path, **kwargs)
+              try:
+                  return response, response.json()
+              except Exception:
+                  return response, {}
+
+          def latest_valid_build():
+              response = require(
+                  api("GET", f"/builds?filter[app]={APP_ID}&sort=-uploadedDate&limit=20"),
+                  "Fetch builds",
+              )
+              for build in response.json().get("data", []):
+                  attrs = build.get("attributes", {})
+                  if attrs.get("version") == BUILD_NUMBER and attrs.get("processingState") == "VALID":
+                      print(f"Using build {BUILD_NUMBER}: {build['id']}")
+                      return build
+              print(f"Build {BUILD_NUMBER} was not found in VALID state.")
+              sys.exit(1)
+
+          def get_or_create_version():
+              response = require(
+                  api("GET", f"/apps/{APP_ID}/appStoreVersions?filter[platform]=IOS&limit=200"),
+                  "Fetch versions",
+              )
+              for version in response.json().get("data", []):
+                  attrs = version.get("attributes", {})
+                  if attrs.get("versionString") == VERSION_STRING:
+                      print(f"Using version {VERSION_STRING}: {version['id']} ({attrs.get('appStoreState')})")
+                      return version
+
+              payload = {
+                  "data": {
+                      "type": "appStoreVersions",
+                      "attributes": {"platform": "IOS", "versionString": VERSION_STRING},
+                      "relationships": {"app": {"data": {"type": "apps", "id": APP_ID}}},
+                  }
+              }
+              response = require(api("POST", "/appStoreVersions", json=payload), "Create version")
+              version = response.json()["data"]
+              print(f"Created version {VERSION_STRING}: {version['id']}")
+              return version
+
+          def attach_build(version_id, build_id):
+              require(
+                  api(
+                      "PATCH",
+                      f"/appStoreVersions/{version_id}/relationships/build",
+                      json={"data": {"type": "builds", "id": build_id}},
+                  ),
+                  "Attach build",
+              )
+              print(f"Attached build: {build_id}")
+
+          def upsert_localization(version_id):
+              response = require(
+                  api("GET", f"/appStoreVersions/{version_id}/appStoreVersionLocalizations"),
+                  "Fetch localizations",
+              )
+              localizations = response.json().get("data", [])
+              loc_id = None
+              locale = "en-US"
+              if localizations:
+                  loc_id = localizations[0]["id"]
+                  locale = localizations[0]["attributes"]["locale"]
+
+              attrs = {
+                  "description": DESCRIPTION,
+                  "keywords": KEYWORDS,
+                  "marketingUrl": SUPPORT_URL,
+                  "supportUrl": SUPPORT_URL,
+              }
+              if loc_id:
+                  require(
+                      api(
+                          "PATCH",
+                          f"/appStoreVersionLocalizations/{loc_id}",
+                          json={
+                              "data": {
+                                  "type": "appStoreVersionLocalizations",
+                                  "id": loc_id,
+                                  "attributes": attrs,
+                              }
+                          },
+                      ),
+                      "Update localization",
+                  )
+                  print(f"Updated localization: {locale}")
+                  return
+
+              attrs["locale"] = locale
+              require(
+                  api(
+                      "POST",
+                      "/appStoreVersionLocalizations",
+                      json={
+                          "data": {
+                              "type": "appStoreVersionLocalizations",
+                              "attributes": attrs,
+                              "relationships": {
+                                  "appStoreVersion": {
+                                      "data": {"type": "appStoreVersions", "id": version_id}
+                                  }
+                              },
+                          }
+                      },
+                  ),
+                  "Create localization",
+              )
+              print(f"Created localization: {locale}")
+
+          def upsert_review_detail(version_id):
+              attrs = {
+                  "contactFirstName": "Tokyo",
+                  "contactLastName": "Nasu",
+                  "contactEmail": "tokyonasu@yahoo.co.jp",
+                  "contactPhone": "+81 80-2368-9194",
+                  "demoAccountRequired": False,
+                  "demoAccountName": "",
+                  "demoAccountPassword": "",
+                  "notes": "No login is required. Open the app and use the synth controls, keyboard, and pattern pads directly.",
+              }
+              response, body = api_json("GET", f"/appStoreVersions/{version_id}/appStoreReviewDetail")
+              if response.status_code == 200 and body.get("data"):
+                  detail_id = body["data"]["id"]
+                  require(
+                      api(
+                          "PATCH",
+                          f"/appStoreReviewDetails/{detail_id}",
+                          json={
+                              "data": {
+                                  "type": "appStoreReviewDetails",
+                                  "id": detail_id,
+                                  "attributes": attrs,
+                              }
+                          },
+                      ),
+                      "Update review detail",
+                  )
+                  print("Updated review detail")
+                  return
+
+              require(
+                  api(
+                      "POST",
+                      "/appStoreReviewDetails",
+                      json={
+                          "data": {
+                              "type": "appStoreReviewDetails",
+                              "attributes": attrs,
+                              "relationships": {
+                                  "appStoreVersion": {
+                                      "data": {"type": "appStoreVersions", "id": version_id}
+                                  }
+                              },
+                          }
+                      },
+                  ),
+                  "Create review detail",
+              )
+              print("Created review detail")
+
+          def cancel_blocking_submissions():
+              for state in ("UNRESOLVED_ISSUES", "READY_FOR_REVIEW", "WAITING_FOR_REVIEW"):
+                  response = api("GET", f"/apps/{APP_ID}/reviewSubmissions?filter[state]={state}&limit=200")
+                  if response.status_code >= 400:
+                      continue
+                  for submission in response.json().get("data", []):
+                      submission_id = submission["id"]
+                      response = api(
+                          "PATCH",
+                          f"/reviewSubmissions/{submission_id}",
+                          json={
+                              "data": {
+                                  "type": "reviewSubmissions",
+                                  "id": submission_id,
+                                  "attributes": {"canceled": True},
+                              }
+                          },
+                      )
+                      if response.status_code < 400:
+                          print(f"Canceled review submission: {submission_id}")
+                          time.sleep(10)
+
+          def submit_review(version_id):
+              cancel_blocking_submissions()
+              response = require(
+                  api(
+                      "POST",
+                      "/reviewSubmissions",
+                      json={
+                          "data": {
+                              "type": "reviewSubmissions",
+                              "attributes": {"platform": "IOS"},
+                              "relationships": {
+                                  "app": {"data": {"type": "apps", "id": APP_ID}}
+                              },
+                          }
+                      },
+                  ),
+                  "Create review submission",
+              )
+              submission_id = response.json()["data"]["id"]
+              require(
+                  api(
+                      "POST",
+                      "/reviewSubmissionItems",
+                      json={
+                          "data": {
+                              "type": "reviewSubmissionItems",
+                              "relationships": {
+                                  "reviewSubmission": {
+                                      "data": {"type": "reviewSubmissions", "id": submission_id}
+                                  },
+                                  "appStoreVersion": {
+                                      "data": {"type": "appStoreVersions", "id": version_id}
+                                  },
+                              },
+                          }
+                      },
+                  ),
+                  "Add review item",
+              )
+              require(
+                  api(
+                      "PATCH",
+                      f"/reviewSubmissions/{submission_id}",
+                      json={
+                          "data": {
+                              "type": "reviewSubmissions",
+                              "id": submission_id,
+                              "attributes": {"submitted": True},
+                          }
+                      },
+                  ),
+                  "Submit review",
+              )
+              print(f"Submitted for review: {submission_id}")
+
+          build = latest_valid_build()
+          version = get_or_create_version()
+          version_id = version["id"]
+          attach_build(version_id, build["id"])
+          upsert_localization(version_id)
+          upsert_review_detail(version_id)
+          submit_review(version_id)
+          PY
