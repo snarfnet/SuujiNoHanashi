@@ -136,6 +136,67 @@ jobs:
               )
               print(f"Attached build: {build_id}")
 
+          def update_content_rights():
+              require(
+                  api(
+                      "PATCH",
+                      f"/apps/{APP_ID}",
+                      json={
+                          "data": {
+                              "type": "apps",
+                              "id": APP_ID,
+                              "attributes": {
+                                  "contentRightsDeclaration": "DOES_NOT_USE_THIRD_PARTY_CONTENT"
+                              },
+                          }
+                      },
+                  ),
+                  "Update content rights",
+              )
+              print("Updated content rights declaration")
+
+          def update_age_rating(version_id):
+              attrs = {
+                  "advertising": False,
+                  "ageAssurance": False,
+                  "alcoholTobaccoOrDrugUseOrReferences": "NONE",
+                  "contests": "NONE",
+                  "gambling": False,
+                  "gamblingSimulated": "NONE",
+                  "gunsOrOtherWeapons": "NONE",
+                  "healthOrWellnessTopics": False,
+                  "horrorOrFearThemes": "NONE",
+                  "kidsAgeBand": None,
+                  "lootBox": False,
+                  "matureOrSuggestiveThemes": "NONE",
+                  "medicalOrTreatmentInformation": "NONE",
+                  "messagingAndChat": False,
+                  "parentalControls": False,
+                  "profanityOrCrudeHumor": "NONE",
+                  "sexualContentGraphicAndNudity": "NONE",
+                  "sexualContentOrNudity": "NONE",
+                  "unrestrictedWebAccess": False,
+                  "userGeneratedContent": False,
+                  "violenceCartoonOrFantasy": "NONE",
+                  "violenceRealistic": "NONE",
+                  "violenceRealisticProlongedGraphicOrSadistic": "NONE",
+              }
+              require(
+                  api(
+                      "PATCH",
+                      f"/ageRatingDeclarations/{version_id}",
+                      json={
+                          "data": {
+                              "type": "ageRatingDeclarations",
+                              "id": version_id,
+                              "attributes": attrs,
+                          }
+                      },
+                  ),
+                  "Update age rating",
+              )
+              print("Updated age rating declaration")
+
           def upsert_localization(version_id):
               response = require(
                   api("GET", f"/appStoreVersions/{version_id}/appStoreVersionLocalizations"),
@@ -325,6 +386,8 @@ jobs:
           version = get_or_create_version()
           version_id = version["id"]
           attach_build(version_id, build["id"])
+          update_content_rights()
+          update_age_rating(version_id)
           upsert_localization(version_id)
           upsert_review_detail(version_id)
           submit_review(version_id)
